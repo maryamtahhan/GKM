@@ -1,22 +1,10 @@
-/*
-Copyright 2025.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
 package v1alpha1
 
 import (
+	"context"
+	"fmt"
+
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -24,56 +12,95 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
-// log is for logging in this package.
-var clustergkmcachelog = logf.Log.WithName("clustergkmcache-resource")
+// +kubebuilder:webhook:path=/mutate-gkm-io-v1alpha1-clustergkmcache,mutating=true,failurePolicy=fail,sideEffects=None,groups=gkm.io,resources=clustergkmcaches,verbs=create;update,versions=v1alpha1,name=mclustergkmcache.kb.io,admissionReviewVersions=v1
+// +kubebuilder:webhook:path=/validate-gkm-io-v1alpha1-clustergkmcache,mutating=false,failurePolicy=fail,sideEffects=None,groups=gkm.io,resources=clustergkmcaches,verbs=create;update,versions=v1alpha1,name=vclustergkmcache.kb.io,admissionReviewVersions=v1
 
-// SetupWebhookWithManager will setup the manager to manage the webhooks
-func (r *ClusterGKMCache) SetupWebhookWithManager(mgr ctrl.Manager) error {
+var (
+	clustergkmcacheLog = logf.Log.WithName("clustergkmcache-resource")
+)
+
+var _ webhook.CustomValidator = &ClusterGKMCache{}
+var _ webhook.CustomDefaulter = &ClusterGKMCache{}
+
+// SetupWebhookWithManager registers the webhook with the controller manager.
+func (w *ClusterGKMCache) SetupWebhookWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewWebhookManagedBy(mgr).
-		For(r).
+		For(&ClusterGKMCache{}).
+		WithDefaulter(w, admission.DefaulterRemoveUnknownOrOmitableFields).
+		WithValidator(w).
 		Complete()
 }
 
-// TODO(user): EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
+// Default implements the mutating webhook logic for defaulting.
+func (w *ClusterGKMCache) Default(_ context.Context, obj runtime.Object) error {
+	cache, ok := obj.(*ClusterGKMCache)
+	if !ok {
+		return apierrors.NewBadRequest(fmt.Sprintf("expected ClusterGKMCache, got %T", obj))
+	}
 
-// +kubebuilder:webhook:path=/mutate-gkm-io-v1alpha1-clustergkmcache,mutating=true,failurePolicy=fail,sideEffects=None,groups=gkm.io,resources=clustergkmcaches,verbs=create;update,versions=v1alpha1,name=mclustergkmcache.kb.io,admissionReviewVersions=v1
+	clustergkmcacheLog.Info("defaulting ClusterGKMCache", "name", cache.Name)
 
-var _ webhook.Defaulter = &ClusterGKMCache{}
+	if cache.Annotations == nil {
+		cache.Annotations = map[string]string{}
+	}
 
-// Default implements webhook.Defaulter so a webhook will be registered for the type
-func (r *ClusterGKMCache) Default() {
-	clustergkmcachelog.Info("default", "name", r.Name)
+	// Example: Auto-annotate something if not set
+	if _, ok := cache.Annotations["gkm.io/example"]; !ok {
+		cache.Annotations["gkm.io/example"] = "defaulted"
+	}
 
-	// TODO(user): fill in your defaulting logic.
+	return nil
 }
 
-// TODO(user): change verbs to "verbs=create;update;delete" if you want to enable deletion validation.
-// NOTE: The 'path' attribute must follow a specific pattern and should not be modified directly here.
-// Modifying the path for an invalid path can cause API server errors; failing to locate the webhook.
-// +kubebuilder:webhook:path=/validate-gkm-io-v1alpha1-clustergkmcache,mutating=false,failurePolicy=fail,sideEffects=None,groups=gkm.io,resources=clustergkmcaches,verbs=create;update,versions=v1alpha1,name=vclustergkmcache.kb.io,admissionReviewVersions=v1
+// ValidateCreate implements validation for create events.
+func (w *ClusterGKMCache) ValidateCreate(_ context.Context, obj runtime.Object) (admission.Warnings, error) {
+	cache, ok := obj.(*ClusterGKMCache)
+	if !ok {
+		return nil, apierrors.NewBadRequest(fmt.Sprintf("expected ClusterGKMCache, got %T", obj))
+	}
 
-var _ webhook.Validator = &ClusterGKMCache{}
+	clustergkmcacheLog.Info("validating ClusterGKMCache create", "name", cache.Name)
 
-// ValidateCreate implements webhook.Validator so a webhook will be registered for the type
-func (r *ClusterGKMCache) ValidateCreate() (admission.Warnings, error) {
-	clustergkmcachelog.Info("validate create", "name", r.Name)
+	if cache.Spec.Image == "" {
+		return nil, fmt.Errorf("spec.image must be set")
+	}
 
-	// TODO(user): fill in your validation logic upon object creation.
+	if _, exists := cache.Annotations["gkm.io/resolvedDigest"]; exists {
+		return nil, fmt.Errorf("annotation gkm.io/resolvedDigest must not be set manually")
+	}
+
 	return nil, nil
 }
 
-// ValidateUpdate implements webhook.Validator so a webhook will be registered for the type
-func (r *ClusterGKMCache) ValidateUpdate(old runtime.Object) (admission.Warnings, error) {
-	clustergkmcachelog.Info("validate update", "name", r.Name)
+// ValidateUpdate implements validation for update events.
+func (w *ClusterGKMCache) ValidateUpdate(_ context.Context, oldObj, newObj runtime.Object) (admission.Warnings, error) {
+	oldCache, ok1 := oldObj.(*ClusterGKMCache)
+	newCache, ok2 := newObj.(*ClusterGKMCache)
+	if !ok1 || !ok2 {
+		return nil, apierrors.NewBadRequest("type assertion to ClusterGKMCache failed")
+	}
 
-	// TODO(user): fill in your validation logic upon object update.
+	clustergkmcacheLog.Info("validating ClusterGKMCache update", "name", newCache.Name)
+
+	oldDigest := oldCache.Annotations["gkm.io/resolvedDigest"]
+	newDigest := newCache.Annotations["gkm.io/resolvedDigest"]
+
+	if oldDigest != newDigest {
+		return nil, fmt.Errorf("modification of gkm.io/resolvedDigest is not allowed")
+	}
+
 	return nil, nil
 }
 
-// ValidateDelete implements webhook.Validator so a webhook will be registered for the type
-func (r *ClusterGKMCache) ValidateDelete() (admission.Warnings, error) {
-	clustergkmcachelog.Info("validate delete", "name", r.Name)
+// ValidateDelete implements validation for delete events.
+func (w *ClusterGKMCache) ValidateDelete(_ context.Context, obj runtime.Object) (admission.Warnings, error) {
+	cache, ok := obj.(*ClusterGKMCache)
+	if !ok {
+		return nil, apierrors.NewBadRequest(fmt.Sprintf("expected ClusterGKMCache, got %T", obj))
+	}
 
-	// TODO(user): fill in your validation logic upon object deletion.
+	clustergkmcacheLog.Info("validating ClusterGKMCache delete", "name", cache.Name)
+
+	// Add delete validation logic here if needed.
 	return nil, nil
 }
