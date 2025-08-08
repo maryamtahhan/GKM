@@ -108,7 +108,10 @@ func (w *GKMCache) Default(ctx context.Context, obj runtime.Object) error {
 	digest, err := verifyImageSignature(ctx, cache.Spec.Image)
 	if err != nil {
 		gkmcachelog.Error(err, "failed to verify image or resolve digest")
-		return err
+		return apierrors.NewBadRequest(fmt.Sprintf(
+			"image signature verification failed for '%s': %s",
+			cache.Spec.Image, err.Error(),
+		))
 	}
 	log.Info("Resolved image digest", "digest", digest)
 
@@ -167,7 +170,7 @@ func (w *GKMCache) ValidateDelete(_ context.Context, _ runtime.Object) (admissio
 // verifyImageSignature verifies the signature on an imageRef and returns its digest if valid.
 func verifyImageSignature(ctx context.Context, imageRef string) (string, error) {
 	// Step 1: Build a bundle from the OCI image (including Rekor + TSA data if available)
-	bndl, digestHex, err := bundleFromOCIImage(imageRef, true, true)
+	bndl, digestHex, err := bundleFromOCIImage(imageRef, true, false)
 	if err != nil {
 		return "", fmt.Errorf("failed to extract bundle from OCI image: %w", err)
 	}
@@ -199,8 +202,11 @@ func verifyImageSignature(ctx context.Context, imageRef string) (string, error) 
 	}
 
 	// Step 5: Build identity policy (optional; configure or disable if needed)
+	// certID, err := verify.NewShortCertificateIdentity(
+	// 	"https://token.actions.githubusercontent.com", "", "", "",
+	// )
 	certID, err := verify.NewShortCertificateIdentity(
-		"https://token.actions.githubusercontent.com", "", "", "",
+		"https://github.com/login/oauth", "", "", "mtahhan@redhat.com",
 	)
 	if err != nil {
 		return "", fmt.Errorf("failed to construct cert identity: %w", err)

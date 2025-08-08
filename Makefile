@@ -324,20 +324,20 @@ get-cert-manager-images:
 .PHONY: deploy-cert-manager
 deploy-cert-manager: get-cert-manager-images
 	@echo "Installing cert-manager base manifests from upstream..."
-	kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
+	$(KUBECTL) apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
 	@echo "Checking for Kind cluster..."
-	@if [[ "$$(kubectl get nodes -o jsonpath='{.items[*].metadata.name}')" =~ "kind" ]]; then \
+	@if [[ "$$($(KUBECTL) get nodes -o jsonpath='{.items[*].metadata.name}')" =~ "kind" ]]; then \
 		echo "Kind detected – applying Kind-specific cert-manager patches..."; \
-		kubectl patch deployment -n cert-manager cert-manager --patch-file=config/kind-gpu/patch-cert-manager-controller.yaml; \
-		kubectl patch deployment -n cert-manager cert-manager-cainjector --patch-file=config/kind-gpu/patch-cert-manager-cainjector.yaml; \
-		kubectl patch deployment -n cert-manager cert-manager-webhook --patch-file=config/kind-gpu/patch-cert-manager-webhook.yaml; \
+		$(KUBECTL) patch deployment -n cert-manager cert-manager --patch-file=config/kind-gpu/patch-cert-manager-controller.yaml; \
+		$(KUBECTL) patch deployment -n cert-manager cert-manager-cainjector --patch-file=config/kind-gpu/patch-cert-manager-cainjector.yaml; \
+		$(KUBECTL) patch deployment -n cert-manager cert-manager-webhook --patch-file=config/kind-gpu/patch-cert-manager-webhook.yaml; \
 	else \
 		echo "Non-Kind cluster – skipping GPU patching for cert-manager."; \
 	fi
 	@echo "Waiting for cert-manager deployment to become available..."
-	kubectl wait --for=condition=Available --timeout=120s -n cert-manager deployment/cert-manager
-	kubectl wait --for=condition=Available --timeout=120s -n cert-manager deployment/cert-manager-webhook
-	kubectl wait --for=condition=Ready --timeout=120s -n cert-manager pod -l app=webhook
+	$(KUBECTL) wait --for=condition=Available --timeout=120s -n cert-manager deployment/cert-manager
+	$(KUBECTL) wait --for=condition=Available --timeout=120s -n cert-manager deployment/cert-manager-webhook
+	$(KUBECTL) wait --for=condition=Ready --timeout=120s -n cert-manager pod -l app=webhook
 
 .PHONY: setup-kind
 setup-kind: ## Create a Kind GPU cluster
@@ -370,18 +370,25 @@ deploy-on-kind: manifests kustomize deploy-cert-manager ## Deploy operator and a
 	  $(SED) -e 's@gkm\.agent\.image=.*@gkm.agent.image=$(AGENT_IMG)@' \
 	      -e 's@gkm\.csi\.image=.*@gkm.csi.image=$(CSI_IMG)@' \
 		  kustomization.yaml.env > kustomization.yaml
-	$(KUSTOMIZE) build config/kind-gpu | kubectl apply -f -
+	$(KUSTOMIZE) build config/kind-gpu | $(KUBECTL) apply -f -
 	@echo "Add label gkm-test-node= to node kind-gpu-sim-worker."
-	kubectl label node kind-gpu-sim-worker gkm-test-node=true
+	$(KUBECTL) label node kind-gpu-sim-worker gkm-test-node=true
+	$(KUSTOMIZE) build config/default | $(KUBECTL) apply -f -
 	@echo "Deployment on Kind GPU cluster completed."
 
+.PHONY: patch-coredns
+patch-coredns:
+	@echo "Patching CoreDNS ConfigMap manually to avoid apply conflicts..."
+	$(KUBECTL)  apply -k config/coredns
+	@echo "Restarting CoreDNS deployment to apply changes..."
+	$(KUBECTL) -n kube-system rollout restart deployment coredns
 
 .PHONY: undeploy-on-kind
 undeploy-on-kind: ## Undeploy operator and agent from the Kind GPU cluster.
 	@echo "Undeploying operator and agent from Kind GPU cluster: $(KIND_CLUSTER_NAME)"
 	$(KUSTOMIZE) build config/kind-gpu | $(KUBECTL) delete --ignore-not-found=$(ignore-not-found) -f -
 	@echo "Undeploy cert-manager"
-	kubectl delete -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
+	$(KUBECTL) delete -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
 	@echo "Undeployment from Kind GPU cluster $(KIND_CLUSTER_NAME) completed."
 
 .PHONY: run-on-kind
