@@ -71,6 +71,8 @@ CSI_IMG ?=quay.io/$(QUAY_USER)/gkm-csi-plugin:$(IMAGE_TAG)
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.31.0
 
+ARCH=$(shell go env GOARCH)
+
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
 GOBIN=$(shell go env GOPATH)/bin
@@ -175,6 +177,9 @@ build: manifests generate fmt vet build-gkm-operator build-gkm-agent build-csi b
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
 	go run ./cmd/main.go
+
+# Define CONTAINER_FLAGS and include ARCH as an argument
+CONTAINER_FLAGS ?= --build-arg TARGETARCH=$(ARCH)
 
 .PHONY: build-image-operator
 build-image-operator:
@@ -361,8 +366,12 @@ kind-load-images: get-example-images ## Load images into the Kind cluster
 	wget -qO- $(KIND_GPU_SIM_SCRIPT) | bash -s load --image-name=${CSI_IMG} --cluster-name=$(KIND_CLUSTER_NAME)
 	@echo "Images loaded successfully into Kind cluster: $(KIND_CLUSTER_NAME)"
 
+.PHONY: tmp-cleanup
+tmp-cleanup:
+	rm -rf k8s-device-plugin-rocm
+
 .PHONY: deploy-on-kind
-deploy-on-kind: manifests kustomize deploy-cert-manager ## Deploy operator and agent to the Kind GPU cluster.
+deploy-on-kind: tmp-cleanup manifests kustomize deploy-cert-manager ## Deploy operator and agent to the Kind GPU cluster.
 	cd config/manager && $(KUSTOMIZE) edit set image quay.io/gkm/operator=${OPERATOR_IMG}
 	cd config/agent && $(KUSTOMIZE) edit set image quay.io/gkm/agent=${AGENT_IMG}
 	cd config/csi-plugin && $(KUSTOMIZE) edit set image quay.io/gkm/gkm-csi-plugin=${CSI_IMG}

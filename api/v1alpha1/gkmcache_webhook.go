@@ -126,7 +126,7 @@ func (w *GKMCache) Default(ctx context.Context, obj runtime.Object) error {
 // +kubebuilder:webhook:path=/validate-gkm-io-v1alpha1-gkmcache,mutating=false,failurePolicy=fail,sideEffects=None,groups=gkm.io,resources=gkmcaches,verbs=create;update,versions=v1alpha1,name=vgkmcache.kb.io,admissionReviewVersions=v1
 
 // ValidateCreate implements webhook.Validator so a webhook will be registered for the type
-func (w *GKMCache) ValidateCreate(_ context.Context, obj runtime.Object) (admission.Warnings, error) {
+func (w *GKMCache) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
 	cache, ok := obj.(*GKMCache)
 	if !ok {
 		return nil, apierrors.NewBadRequest(fmt.Sprintf("expected GKMCache, got %T", obj))
@@ -136,9 +136,22 @@ func (w *GKMCache) ValidateCreate(_ context.Context, obj runtime.Object) (admiss
 		return nil, fmt.Errorf("spec.image must be set")
 	}
 
-	if _, exists := cache.Annotations["gkm.io/resolvedDigest"]; exists {
-		return nil, fmt.Errorf("users may not set gkm.io/resolvedDigest directly")
+	// Recompute digest from the image (same logic used by mutator).
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	digest, err := verifyImageSignature(ctx, cache.Spec.Image)
+	if err != nil {
+		return nil, fmt.Errorf("image signature verification failed: %w", err)
 	}
+
+	ann := cache.Annotations["gkm.io/resolvedDigest"]
+	if ann == "" || ann != digest {
+		return nil, fmt.Errorf("gkm.io/resolvedDigest mismatch - this is not the digest of the verified image")
+	}
+	// if _, exists := cache.Annotations["gkm.io/resolvedDigest"]; exists {
+	// 	return nil, fmt.Errorf("users may not set gkm.io/resolvedDigest directly")
+	// }
 
 	return nil, nil
 }
@@ -182,7 +195,9 @@ func verifyImageSignature(ctx context.Context, imageRef string) (string, error) 
 	}
 
 	// Step 3: Load trusted roots from TUF
-	tufClient, err := tuf.New(tuf.DefaultOptions())
+	opts := tuf.DefaultOptions()
+	opts.CachePath = "/tmp/.sigstore" // TODO update
+	tufClient, err := tuf.New(opts)
 	if err != nil {
 		return "", fmt.Errorf("failed to initialize TUF: %w", err)
 	}

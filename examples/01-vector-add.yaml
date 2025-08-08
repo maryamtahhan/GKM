@@ -10,4 +10,4 @@ metadata:
   name: vector-add-cache
   namespace: gkm-test-ns-scoped
 spec:
-  image: quay.io/mtahhan/01-vector-add-cache
+  image: quay.io/mtahhan/01-vector-add-cache:latest

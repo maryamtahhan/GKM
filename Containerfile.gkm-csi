@@ -1,3 +1,5 @@
+ARG TARGETARCH
+
 FROM public.ecr.aws/docker/library/golang:1.24.4  AS csi-builder
 ARG TARGETOS
 ARG TARGETARCH
@@ -32,7 +34,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     libc-dev \
     libffi-dev \
-    linux-headers-amd64 \
+    linux-headers-$(TARGETARCH)\
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace
@@ -48,6 +50,7 @@ RUN make build
 # Use the fedora minimal image to reduce the size of the final image but still
 # be able to easily install extra packages.
 FROM quay.io/fedora/fedora-minimal
+ARG TARGETARCH
 
 RUN dnf update && dnf install -y \
     gpgme-devel \
@@ -57,7 +60,7 @@ RUN dnf update && dnf install -y \
 # Copy the binary from the builder
 COPY --from=csi-builder /workspace/bin/gkm-csi-plugin /usr/sbin/.
 COPY --from=csi-builder /workspace/bin/gkm-agent-stub /usr/sbin/.
-COPY --from=tcv-builder /workspace/TKDK/tcv/_output/bin/linux_amd64/tcv /usr/sbin/.
+COPY --from=tcv-builder /workspace/TKDK/tcv/_output/bin/linux_${TARGETARCH}/tcv /usr/sbin/.
 ENV PATH="$PATH:/usr/sbin"
 
 # Run as non-root user
