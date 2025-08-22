@@ -23,6 +23,8 @@ import (
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -86,20 +88,14 @@ func (r *GKMCacheOperatorReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		r.Logger.Info("Reconciling GKMCache", "Namespace", r.currCache.Namespace, "Name", r.currCache.Name)
 
 		if !r.isCacheBeingDeleted() {
-			// Add Finalizer to GKMCache if not there. This is a KubeAPI call, so return if finalizer needed to be added.
-			if changed := controllerutil.AddFinalizer(r.currCache, r.getCacheFinalizer()); changed {
-				r.Logger.Info("Calling KubeAPI to add finalizer to GKMCache",
-					"Namespace", r.currCache.Namespace,
-					"CacheNodeName", r.currCache.Name,
-				)
-				err := r.Update(ctx, r.currCache)
-				if err != nil {
-					r.Logger.Error(err, "failed to add Finalizer to GKMCache")
-					errorHit = true
-					continue
-				}
-				// GKMCache object was updated. Return and change will retrigger a new reconcile.
-				return ctrl.Result{Requeue: false}, nil
+			if err := r.ensureFinalizer(ctx, types.NamespacedName{
+				Namespace: r.currCache.Namespace,
+				Name:      r.currCache.Name,
+			}); err != nil {
+				r.Logger.Error(err, "failed to ensure finalizer on GKMCache",
+					"Namespace", r.currCache.Namespace, "Name", r.currCache.Name)
+				errorHit = true
+				continue
 			}
 		}
 
@@ -161,19 +157,14 @@ func (r *GKMCacheOperatorReconciler) Reconcile(ctx context.Context, req ctrl.Req
 			if totalNodeCnt == 0 {
 				// Everything should be cleaned up, so delete the GKMCacheNode specific
 				// finalizer from the GKMCache.
-				if changed := controllerutil.RemoveFinalizer(r.currCache, r.getCacheFinalizer()); changed {
-					r.Logger.Info("Calling KubeAPI to delete GKMCacheNode Finalizer from GKMCache",
-						"Namespace", r.currCache.Namespace,
-						"CacheNodeName", r.currCache.Name,
-					)
-					err := r.Update(ctx, r.currCache)
-					if err != nil {
-						r.Logger.Error(err, "failed to delete GKMCacheNode Finalizer from GKMCache")
-						errorHit = true
-						continue
-					}
-					// GKMCache object was updated. Return and change will retrigger a new reconcile.
-					return ctrl.Result{Requeue: false}, nil
+				if err := r.ensureFinalizerRemoved(ctx, types.NamespacedName{
+					Namespace: r.currCache.Namespace,
+					Name:      r.currCache.Name,
+				}); err != nil {
+					r.Logger.Error(err, "failed to remove finalizer from GKMCache",
+						"Namespace", r.currCache.Namespace, "Name", r.currCache.Name)
+					errorHit = true
+					continue
 				}
 			} else {
 				r.Logger.Info("Deleting GKMCache still in progress",
@@ -232,4 +223,38 @@ func (r *GKMCacheOperatorReconciler) getCacheNodeList(ctx context.Context, cache
 	}
 
 	return cacheNodeList, nil
+}
+
+func (r *GKMCacheOperatorReconciler) ensureFinalizer(ctx context.Context, nn types.NamespacedName) error {
+	finalizer := r.getCacheFinalizer()
+	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		var latest gkmv1alpha1.GKMCache
+		if err := r.Get(ctx, nn, &latest); err != nil {
+			return client.IgnoreNotFound(err)
+		}
+		if controllerutil.ContainsFinalizer(&latest, finalizer) {
+			return nil // nothing to do
+		}
+		base := latest.DeepCopy()
+		controllerutil.AddFinalizer(&latest, finalizer)
+		r.Logger.Info("Adding finalizer to GKMCache", "namespace", latest.Namespace, "name", latest.Name)
+		return r.Patch(ctx, &latest, client.MergeFrom(base))
+	})
+}
+
+func (r *GKMCacheOperatorReconciler) ensureFinalizerRemoved(ctx context.Context, nn types.NamespacedName) error {
+	finalizer := r.getCacheFinalizer()
+	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		var latest gkmv1alpha1.GKMCache
+		if err := r.Get(ctx, nn, &latest); err != nil {
+			return client.IgnoreNotFound(err)
+		}
+		if !controllerutil.ContainsFinalizer(&latest, finalizer) {
+			return nil // nothing to do
+		}
+		base := latest.DeepCopy()
+		controllerutil.RemoveFinalizer(&latest, finalizer)
+		r.Logger.Info("Removing finalizer from GKMCache", "namespace", latest.Namespace, "name", latest.Name)
+		return r.Patch(ctx, &latest, client.MergeFrom(base))
+	})
 }

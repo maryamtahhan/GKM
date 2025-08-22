@@ -2,8 +2,7 @@
 apiVersion: gkm.io/v1alpha1
 kind: GKMCache
 metadata:
-  name: flash-attention-rocm
+  name: llama-3-1-8b-instruct
   namespace: gkm-test-ns-scoped
-  annotations:
 spec:
-  image: quay.io/mtahhan/flash-attention-rocm:latest
+  image: quay.io/mtahhan/moc-demo:Llama-3.1-8B-Instruct

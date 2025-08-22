@@ -27,7 +27,7 @@ import (
 )
 
 var (
-	gkmcachelog                         = logf.Log.WithName("gkmcache-resource")
+	gkmCacheLog                         = logf.Log.WithName("gkmcache-resource")
 	_           webhook.CustomDefaulter = &GKMCache{}
 	_           webhook.CustomValidator = &GKMCache{}
 )
@@ -56,24 +56,24 @@ func (w *GKMCache) SetupWebhookWithManager(mgr ctrl.Manager) error {
 
 // Default implements the defaulting logic (mutating webhook)
 // The mutating webhook writes both the resolved digest and a
-// gkm.io/mutationSig that’s bound to the current AdmissionRequest UID + image
+// gkm.io/mutationSig that’s bound to the current image
 // + digest. The validating webhooks only accept the digest if that signature
 // is valid, which guarantees the digest came from the mutator (not the user).
 func (w *GKMCache) Default(ctx context.Context, obj runtime.Object) error {
-	gkmcachelog.Info("Webhook called", "object", obj)
+	gkmCacheLog.Info("Webhook called", "object", obj)
 
 	cache, ok := obj.(*GKMCache)
 	if !ok {
 		return apierrors.NewBadRequest(fmt.Sprintf("expected GKMCache, got %T", obj))
 	}
-	gkmcachelog.Info("Decoded GKMCache object", "name", cache.Name, "namespace", cache.Namespace)
+	gkmCacheLog.Info("Decoded GKMCache object", "name", cache.Name, "namespace", cache.Namespace)
 
 	if cache.Annotations == nil {
 		cache.Annotations = map[string]string{}
 	}
 
 	if cache.Spec.Image == "" {
-		gkmcachelog.Info("spec.image is empty, skipping")
+		gkmCacheLog.Info("spec.image is empty, skipping")
 		return nil
 	}
 
@@ -81,10 +81,10 @@ func (w *GKMCache) Default(ctx context.Context, obj runtime.Object) error {
 	cctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	gkmcachelog.Info("Verifying image signature", "image", cache.Spec.Image)
+	gkmCacheLog.Info("Verifying image signature", "image", cache.Spec.Image)
 	digest, err := verifyImageSignature(cctx, cache.Spec.Image)
 	if err != nil {
-		gkmcachelog.Error(err, "failed to verify image or resolve digest")
+		gkmCacheLog.Error(err, "failed to verify image or resolve digest")
 		return apierrors.NewBadRequest(fmt.Sprintf(
 			"image signature verification failed for '%s': %s",
 			cache.Spec.Image, err.Error(),
@@ -110,7 +110,7 @@ func (w *GKMCache) Default(ctx context.Context, obj runtime.Object) error {
 	// Audit for convenience (not part of trust)
 	cache.Annotations[annLastMutatedBy] = req.UserInfo.Username
 
-	gkmcachelog.Info("added/updated resolvedDigest", "digest", digest)
+	gkmCacheLog.Info("added/updated resolvedDigest", "digest", digest)
 	return nil
 }
 
@@ -179,10 +179,13 @@ func (w *GKMCache) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.Ob
 	newDigest := newCache.Annotations[annResolvedDigest]
 	newSig := newCache.Annotations[annMutationSig]
 
-	// If image didn't change, digest must not change.
+	// If image didn't change, digest + signer must not change.
 	if oldImg == newImg {
 		if oldDigest != newDigest {
 			return nil, fmt.Errorf("%s is immutable when spec.image is unchanged", annResolvedDigest)
+		}
+		if newCache.Annotations[annMutationSig] != oldCache.Annotations[annMutationSig] {
+			return nil, fmt.Errorf("%s is immutable when spec.image is unchanged", annMutationSig)
 		}
 		return nil, nil
 	}
@@ -213,7 +216,7 @@ func (w *GKMCache) ValidateDelete(_ context.Context, obj runtime.Object) (admiss
 		return nil, apierrors.NewBadRequest(fmt.Sprintf("expected GKMCache, got %T", obj))
 	}
 
-	clustergkmcacheLog.Info("validating GKMCache delete", "name", cache.Name)
+	gkmCacheLog.Info("validating GKMCache delete", "name", cache.Name)
 
 	// Add delete validation logic here if needed.
 	return nil, nil

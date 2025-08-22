@@ -5,9 +5,9 @@ metadata:
   name: operator-role
 rules:
 - apiGroups:
-  - apps
+  - ""
   resources:
-  - daemonsets
+  - configmaps
   verbs:
   - create
   - delete
@@ -19,11 +19,20 @@ rules:
 - apiGroups:
   - ""
   resources:
-  - configmaps
+  - configmaps/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - apps
+  resources:
+  - daemonsets
   verbs:
   - create
+  - delete
   - get
   - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - gkm.io
@@ -42,7 +51,6 @@ rules:
   - gkm.io
   resources:
   - clustergkmcachenodes/finalizers
-  - configmaps/finalizers
   - gkmcaches/finalizers
   verbs:
   - update
